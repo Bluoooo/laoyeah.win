@@ -1,0 +1,35 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "world_cup_2026"
+version = "0.0.1"
+description = "ML pipeline for FIFA World Cup 2026 prediction using ensemble models and Monte Carlo simulation"
+authors = [
+  { name = "Federico Ceballos Torres" },
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License"
+]
+requires-python = "~=3.10.0"
+
+[tool.black]
+line-length = 99
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+)/
+'''
+
+[tool.isort]
+profile = "black"
+known_first_party = ["world_cup_2026"]
+force_sort_within_sections = true
+
+

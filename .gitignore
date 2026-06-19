@@ -2,5 +2,6 @@ reveal.jpg
 alt-bg.jpg
 messi.jpg
 .DS_Store
-*.log
+*.pyc
 __pycache__/
+engine/data/predictions.json

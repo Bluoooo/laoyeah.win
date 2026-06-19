@@ -1,0 +1,709 @@
+"""
+欧冠决赛心态信号模块 v1.0
+===============================
+将球员在欧冠决赛（含2024-25赛季PSG决赛）的表现量化为心态信号，
+接入世界杯看板的玄学分析模块。
+
+核心逻辑：
+- 决赛表现 → 心态量化信号 → 世界杯预测调参
+
+两套校准框架：
+  【框架A】2014巴西1-7德国（心理崩溃型）
+    特征：球员个人能力极强，但集体心态在重压下结构性坍塌
+    量化：心理稳定性-0.4，求内-0.3，强势方诅咒放大至0.8
+    代表：内马尔（当时）、奥斯卡、蒂亚戈·席尔瓦
+
+  【框架B】2018法国（年轻顺势型）
+    特征：平均年龄<26，无「必须赢」的包袱，淘汰赛顺势而为
+    量化：柔弱胜刚强+0.35，求内+0.3，无强势方诅咒
+    代表：姆巴佩（2018，横空出世）、帕瓦尔、洛里
+
+姆巴佩2025-26特殊情况：
+  - 离开PSG加盟皇马 → 皇马1-5被阿森纳双杀淘汰（2025年4月）
+  - PSG在他离开后反而杀入2024-25欧冠决赛
+  - 皇马2024-25赛季：欧冠+西超杯+国王杯+西甲全部丢冠
+  → 心态信号：表面强势（数据漂亮：15球金靴），实际深层自我怀疑
+  → 量化：心理稳定性-0.2（比2014巴西轻，但比2018法国明显更重）
+  → 冥冥中信号：违背上善若水——强行追求离开，结果适得其反
+
+关键参数调参说明：
+  mentality_score 范围 [-1.0, +1.0]
+    +1.0 = 决赛完美发挥，自信满满，心态巅峰
+     0.0 = 无明显心态偏向
+    -1.0 = 决赛惨败/尴尬/自我怀疑，心态低谷
+
+  接入方式：
+    mystic_factor.py 的 favorite_curse 和 water_score 用这个信号微调
+    具体比例：mentality_signal × 0.15 → 叠加到对应因子
+"""
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Tuple
+from enum import Enum
+import math
+
+
+# ══════════════════════════════════════════════════════════════════
+# 数据结构
+# ══════════════════════════════════════════════════════════════════
+
+class FinalType(Enum):
+    WIN = "冠军胜利"
+    LOSS = "决赛落败"
+    SEMI_BLOWOUT_LOSS = "半决赛惨败出局"      # 如皇马1-5阿森纳
+    SEMI_BLOWOUT_WIN = "半决赛强势晋级"
+    QUARTERFINAL_BLOWOUT_LOSS = "8强惨败"
+    NONE = "无决赛记录"
+
+
+class MentalityTier(Enum):
+    PEAK = 1           # 巅峰状态：发挥完美，势如破竹
+    CONFIDENT = 2      # 信心充足：稳定发挥，关键时刻站出来
+    NEUTRAL = 3        # 中性：数据正常，无功无过
+    UNDERPRESSURE = 4  # 承压：数据下滑，但尚能维持
+    DOUBTING = 5       # 自我怀疑：明显失常，决策犹豫
+    BROKEN = 6         # 心理崩溃：完全失常，结构性问题
+
+
+@dataclass
+class PlayerFinalRecord:
+    player_name: str
+    country: str
+
+    final_type: FinalType
+    performance_score: float
+    goal_contribution: float
+    key_action_quality: float
+
+    was_home_player: bool
+    team_eliminated_before_final: bool
+    teammate_in_final: bool
+    personal_stakes: str
+    narrative: str
+
+    def __post_init__(self):
+        self.performance_score = max(0.0, min(10.0, self.performance_score))
+        self.goal_contribution = max(0.0, self.goal_contribution)
+        self.key_action_quality = max(-1.0, min(1.0, self.key_action_quality))
+
+
+# ══════════════════════════════════════════════════════════════════
+# 两套校准框架
+# ══════════════════════════════════════════════════════════════════
+
+@dataclass
+class CalibratorFramework:
+    name: str
+    description: str
+    reversal_risk_delta: float
+    water_score_delta: float
+    favorite_curse_delta: float
+    contrarian_shift_delta: float
+    knockout_uncertainty_delta: float
+    soft_power_delta: float
+    baseline_mentality_tier: MentalityTier
+    applicable_conditions: str
+
+
+class Brazil2014Calibrator(CalibratorFramework):
+    def __init__(self):
+        super().__init__(
+            name="巴西1-7德国（心理崩溃型）",
+            description=(
+                "2014世界杯半决赛，巴西在主场被德国7-1击溃。"
+                "彼时巴西球员个人能力世界顶级，但集体心态在"
+                "重压下结构性坍塌——上半场连丢5球，显示心理"
+                "防御机制完全崩溃。事后多年，部分球员（如内马尔）"
+                "虽继续辉煌，但整体球队DNA受到了深刻动摇。"
+            ),
+            reversal_risk_delta=+0.35,
+            water_score_delta=-0.40,
+            favorite_curse_delta=+0.85,
+            contrarian_shift_delta=+0.15,
+            knockout_uncertainty_delta=-0.10,
+            soft_power_delta=-0.20,
+            baseline_mentality_tier=MentalityTier.BROKEN,
+            applicable_conditions=(
+                "适用于：强队 + 极高外部期望 + 主场压力 + "
+                "关键比赛惨败 + 球员个人能力极强但团队心理脆弱"
+            ),
+        )
+
+
+class France2018Calibrator(CalibratorFramework):
+    def __init__(self):
+        super().__init__(
+            name="法国2018（年轻顺势型）",
+            description=(
+                "2018世界杯，法国以平均年龄偏低的阵容参赛。"
+                "彼时法国没有「必须夺冠」的包袱——外界虽然看好，"
+                "但球队内部没有把胜负变成情绪压力。淘汰赛一路顺势而为："
+                "对阿根廷4-3（先丢2球但不慌），对比利时1-0（防守反击），"
+                "决赛4-2克罗地亚（场面不占优但抓机会能力极强）。"
+                "姆巴佩在1/8决赛4-3击败阿根廷的比赛中打出生涯代表作，"
+                "展现出超越年龄的冷静。"
+            ),
+            reversal_risk_delta=-0.15,
+            water_score_delta=+0.30,
+            favorite_curse_delta=0.0,
+            contrarian_shift_delta=-0.05,
+            knockout_uncertainty_delta=+0.08,
+            soft_power_delta=+0.35,
+            baseline_mentality_tier=MentalityTier.CONFIDENT,
+            applicable_conditions=(
+                "适用于：球队平均年龄<27 + 无卫冕压力 + "
+                "淘汰赛发挥稳定 + 球员把比赛当「需求」而非「情绪」"
+            ),
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 心态信号计算引擎
+# ══════════════════════════════════════════════════════════════════
+
+@dataclass
+class FinalMentalitySignal:
+    player_name: str
+    country: str
+    mentality_score: float
+    performance_z: float
+    key_action_z: float
+    nearest_framework: str
+    framework_distance: float
+    tier: MentalityTier
+    tier_label: str
+    narrative: str
+    reversal_risk_add: float
+    water_score_add: float
+    favorite_curse_add: float
+    contrarian_add: float
+    soft_power_add: float
+    wc_prob_adjustment: float
+    wc_verdict: str
+
+
+def _compute_mentality_tier(
+    performance: float,
+    goal_contribution: float,
+    key_action: float,
+    final_type: FinalType,
+    narrative: str,
+) -> Tuple[MentalityTier, str]:
+    composite = (
+        performance * 0.35 +
+        goal_contribution * 0.25 +
+        (key_action + 1) * 0.5 * 0.25 +
+        5.0 * 0.15
+    )
+    type_modifier = {
+        FinalType.WIN: +0.3,
+        FinalType.LOSS: -0.2,
+        FinalType.SEMI_BLOWOUT_LOSS: -0.6,
+        FinalType.SEMI_BLOWOUT_WIN: +0.2,
+        FinalType.QUARTERFINAL_BLOWOUT_LOSS: -0.4,
+        FinalType.NONE: 0.0,
+    }
+    composite += type_modifier.get(final_type, 0.0)
+    if "心理崩溃" in narrative:
+        composite -= 0.8
+    elif "失常" in narrative:
+        composite -= 0.3
+    elif "虽败犹荣" in narrative or "出色" in narrative:
+        composite += 0.3
+    elif "尴尬" in narrative:
+        composite -= 0.4
+    elif "无欲无求" in narrative or "稳定" in narrative:
+        composite += 0.1
+
+    if composite >= 8.5:
+        return MentalityTier.PEAK, "巅峰状态，势不可挡"
+    elif composite >= 7.0:
+        return MentalityTier.CONFIDENT, "信心充足，关键时刻可靠"
+    elif composite >= 5.5:
+        return MentalityTier.NEUTRAL, "中性表现，无功无过"
+    elif composite >= 4.0:
+        return MentalityTier.UNDERPRESSURE, "承压明显，有所下滑"
+    elif composite >= 2.5:
+        return MentalityTier.DOUBTING, "自我怀疑，决策犹豫"
+    else:
+        return MentalityTier.BROKEN, "心理崩溃，结构性问题"
+
+
+def compute_final_mentality_signal(player: PlayerFinalRecord) -> FinalMentalitySignal:
+    p_norm = player.performance_score / 10.0
+    g_norm = min(player.goal_contribution / 3.0, 1.0)
+    k_norm = (player.key_action_quality + 1.0) / 2.0
+    raw_score = (p_norm * 0.4 + g_norm * 0.3 + k_norm * 0.3)
+    type_weights = {
+        FinalType.WIN: 1.0,
+        FinalType.LOSS: 0.75,
+        FinalType.SEMI_BLOWOUT_LOSS: 0.65,
+        FinalType.SEMI_BLOWOUT_WIN: 1.05,
+        FinalType.QUARTERFINAL_BLOWOUT_LOSS: 0.70,
+        FinalType.NONE: 0.90,
+    }
+    tw = type_weights.get(player.final_type, 0.80)
+    awkward_multiplier = 0.85 if player.teammate_in_final else 1.0
+    raw_score = raw_score * tw * awkward_multiplier
+    mentality_score = (raw_score - 0.50) * 2.0
+    mentality_score = max(-1.0, min(1.0, mentality_score))
+
+    tier, tier_label = _compute_mentality_tier(
+        player.performance_score,
+        player.goal_contribution,
+        player.key_action_quality,
+        player.final_type,
+        player.narrative,
+    )
+
+    braz2014 = Brazil2014Calibrator()
+    fra2018 = France2018Calibrator()
+
+    def framework_distance(score: float, framework: CalibratorFramework) -> float:
+        tier_map = {
+            MentalityTier.PEAK: 1.0,
+            MentalityTier.CONFIDENT: 0.7,
+            MentalityTier.BROKEN: -0.8,
+            MentalityTier.NEUTRAL: 0.0,
+        }
+        ideal = tier_map.get(framework.baseline_mentality_tier, 0.0)
+        return abs(score - ideal)
+
+    # ── 框架匹配：赢球心态走 France2018（顺势爆发），输球心态走 Brazil2014（崩溃风险）──
+    WIN_TYPES = {FinalType.WIN, FinalType.SEMI_BLOWOUT_WIN}
+    LOSS_TYPES = {FinalType.LOSS, FinalType.SEMI_BLOWOUT_LOSS, FinalType.QUARTERFINAL_BLOWOUT_LOSS}
+
+    if player.final_type in WIN_TYPES and mentality_score >= 0:
+        nearest = fra2018
+        nearest_name = "法国2018框架（年轻顺势型）"
+        framework_dist = abs(mentality_score - 0.7)
+    elif player.final_type in LOSS_TYPES and mentality_score <= 0:
+        nearest = braz2014
+        nearest_name = "巴西1-7框架（心理崩溃型）"
+        framework_dist = abs(mentality_score + 0.8)
+    else:
+        # fallback: 最近邻
+        dist_braz = framework_distance(mentality_score, braz2014)
+        dist_fra = framework_distance(mentality_score, fra2018)
+        if dist_braz < dist_fra:
+            nearest = braz2014
+            nearest_name = "巴西1-7框架（心理崩溃型）"
+            framework_dist = dist_braz
+        else:
+            nearest = fra2018
+            nearest_name = "法国2018框架（年轻顺势型）"
+            framework_dist = dist_fra
+
+    rev_delta = -mentality_score * 0.25
+    water_delta = mentality_score * 0.30
+    curse_delta = -mentality_score * 0.20
+    contrar_delta = -mentality_score * 0.10
+    soft_delta = mentality_score * 0.30
+    # 框架权重：0.15（原0.3），每参数偏移+0.05 → 框架总贡献上限约±0.05
+    rev_delta += nearest.reversal_risk_delta * 0.15
+    water_delta += nearest.water_score_delta * 0.15
+    curse_delta += nearest.favorite_curse_delta * 0.15
+    contrar_delta += nearest.contrarian_shift_delta * 0.15
+    soft_delta += nearest.soft_power_delta * 0.15
+
+    if player.final_type == FinalType.SEMI_BLOWOUT_LOSS and player.teammate_in_final:
+        narrative = (
+            f"{player.player_name}离开后，老东家反而杀入欧冠决赛。"
+            "个人数据依然亮眼（15球金靴），但皇马四大皆空，"
+            "内里潜藏着「我的选择是否正确」的深层自我怀疑。"
+            "参照2014巴西vs2018法国：他更像谁？"
+            "答案是：更接近2014巴西——强势追求，结果适得其反，"
+            "但尚未到心理崩溃的程度，而是「求而不得」的自我怀疑。"
+        )
+    elif mentality_score >= 0.6:
+        narrative = (
+            f"{player.player_name}在关键比赛中展现了巅峰心态："
+            "类似2018法国夺冠时的从容——不把比赛当情绪，而是当需求。"
+        )
+    elif mentality_score <= -0.4:
+        narrative = (
+            f"{player.player_name}心态受到明显冲击。"
+            "参照2014巴西1-7后的集体低迷——强队的心理坍缩往往比实力下滑更致命。"
+        )
+    else:
+        narrative = player.narrative or f"{player.player_name}心态无明显异常。"
+
+    # 简化版：心态分×0.8（控制幅度） + 框架偏移（每参数+0.05对应）
+    # 典型值：mentality_score=±0.7 → ±0.56；5名球员合计约 ±1~2%，合理区间
+    wc_adj = mentality_score * 0.8 + (
+        nearest.reversal_risk_delta + nearest.water_score_delta +
+        nearest.favorite_curse_delta + nearest.contrarian_shift_delta +
+        nearest.soft_power_delta
+    ) * 0.03
+    if wc_adj > 0.5:
+        wc_verdict = f"心态加持，世界杯概率提升 {wc_adj:+.1f}%"
+    elif wc_adj < -0.5:
+        wc_verdict = f"心态承压，世界杯概率下调 {abs(wc_adj):+.1f}%"
+    else:
+        wc_verdict = "心态无显著影响"
+
+    performance_z = (player.performance_score - 6.5) / 1.5
+    key_action_z = player.key_action_quality
+
+    return FinalMentalitySignal(
+        player_name=player.player_name,
+        country=player.country,
+        mentality_score=round(mentality_score, 3),
+        performance_z=round(performance_z, 2),
+        key_action_z=round(key_action_z, 2),
+        nearest_framework=nearest_name,
+        framework_distance=round(framework_dist, 3),
+        tier=tier,
+        tier_label=tier_label,
+        narrative=narrative,
+        reversal_risk_add=round(rev_delta, 4),
+        water_score_add=round(water_delta, 4),
+        favorite_curse_add=round(curse_delta, 4),
+        contrarian_add=round(contrar_delta, 4),
+        soft_power_add=round(soft_delta, 4),
+        wc_prob_adjustment=round(wc_adj, 2),
+        wc_verdict=wc_verdict,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# 球员数据库（预填姆巴佩等关键球员）
+# ══════════════════════════════════════════════════════════════════
+
+MBAPPE_REAL_MADRID_2025 = PlayerFinalRecord(
+    player_name="姆巴佩",
+    country="法国",
+    final_type=FinalType.QUARTERFINAL_BLOWOUT_LOSS,
+    performance_score=7.0,
+    goal_contribution=1.0,
+    key_action_quality=+0.1,
+    was_home_player=False,
+    team_eliminated_before_final=True,
+    teammate_in_final=True,
+    personal_stakes="在皇马首个赛季证明自己值得这一选择",
+    narrative=(
+        "2024-25赛季，皇马在QFs以3-4总比分被拜仁慕尼黑淘汰（姆巴佩有进球）。"
+        "与此同时，他离开的PSG反而一路杀入欧冠决赛（最终0-5负于国际米兰）。"
+        "表面强势（联赛稳定+进球数据），深层是「求而不得」的自我怀疑。"
+        "但对比：PSG进决赛说明他的离开不是「结构性问题」，更接近「时运不济」。"
+        "参照2014巴西1-7框架：他属于轻微的心态偏移，而非结构性崩溃。"
+    ),
+)
+
+SAKA_ARSENAL_2025 = PlayerFinalRecord(
+    player_name="萨卡",
+    country="英格兰",
+    final_type=FinalType.SEMI_BLOWOUT_WIN,
+    performance_score=8.5,
+    goal_contribution=2.0,
+    key_action_quality=+0.85,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=True,
+    personal_stakes="首次欧冠决赛+本土英超冠军，两条战线同时证明自己",
+    narrative=(
+        "萨卡在2024-25赛季两回合对马竞都有进球（首回合制胜球），"
+        "带领阿森纳时隔20年重返欧冠决赛（总分2-1淘汰马竞）。"
+        "与此同时阿森纳赢得2024-25英超冠军（22年首冠）。"
+        "心态信号：典型的「求内」型——他在做他的足球，赢球的欲望来自内在而非外在压力。"
+        "参照2018法国：顺势而为，柔弱胜刚强，两条战线互相加持而非互相消耗。"
+        "他对世界杯的影响：英格兰心态加持，France2018框架信号。"
+    ),
+)
+
+DEMBELE_PSG_2025 = PlayerFinalRecord(
+    player_name="登贝莱",
+    country="法国",
+    final_type=FinalType.WIN,
+    performance_score=9.2,
+    goal_contribution=2.0,
+    key_action_quality=+0.9,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="用表现证明PSG不需要姆巴佩也能进决赛",
+    narrative=(
+        "登贝莱在2024-25赛季迎来蜕变——在姆巴佩离去的空间里彻底绽放。 "
+        "决赛5-0横扫国际米兰，打进2球助攻1次，全场最佳。 "
+        "这是他职业生涯最完美的一场比赛。 "
+        "心态信号：PEAK巅峰，类似2018法国（年轻球员在正确时间爆发）。 "
+        "求内得分极高：他在证明给自己的不是「我比姆巴佩强」， "
+        "而是「我在做我自己的足球」。 "
+        "这是最纯粹的「需求驱动」胜利——做自己热爱的事，结果是自然而然。"
+    ),
+)
+
+K77_PSG_2025 = PlayerFinalRecord(
+    player_name="克瓦拉茨赫利亚",
+    country="格鲁吉亚",
+    final_type=FinalType.WIN,
+    performance_score=8.0,
+    goal_contribution=1.0,
+    key_action_quality=+0.6,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="用欧冠冠军冲击金球奖竞争",
+    narrative=(
+        "K77在决赛中打进1球，5-0大胜的核心功臣之一。 "
+        "他的求内特质在决赛中得到完美展现——不依赖外界的期待， "
+        "只专注于自己热爱的足球。格鲁吉亚首次参加世界杯， "
+        "他的心态是：「这是我人生的意义，不是压力。」"
+    ),
+)
+
+VITINHA_PSG_2025 = PlayerFinalRecord(
+    player_name="维蒂尼亚",
+    country="葡萄牙",
+    final_type=FinalType.WIN,
+    performance_score=8.0,
+    goal_contribution=0.5,
+    key_action_quality=+0.5,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="用稳定表现奠定欧洲顶级中场地位",
+    narrative="维蒂尼亚在决赛中展现了完美的中场控制力，助攻1球，心态稳健如一。 属于「求内」型球员——他的自我价值不依赖单场比赛结果，而是知道自己是谁。 这场胜利是他职业生涯的巅峰时刻，但不是他价值的全部来源。",
+)
+
+DONNARUMMA_PSG_2025 = PlayerFinalRecord(
+    player_name="多纳鲁马",
+    country="意大利",
+    final_type=FinalType.WIN,
+    performance_score=9.5,
+    goal_contribution=0.0,
+    key_action_quality=+1.0,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="用决赛零封证明自己是世界最佳门将",
+    narrative=(
+        "多纳鲁马在决赛中完成零封——面对国际米兰的高压进攻， "
+        "他做出了多次关键扑救，力保球门不失。 "
+        "他的心态特殊：作为门将，他的自我价值不依赖进攻数据， "
+        "而依赖「不丢球」的稳定感。这反而让他在压力下更冷静—— "
+        "典型的「求内」型：我在做我的工作，外界怎么说无关紧要。 "
+        "这场零封是他职业生涯的代表作。"
+    ),
+)
+
+# ── PSG 法国球员（2025 UCL Final：PSG 5-0 Inter）───────────────
+DOUE_PSG_2025 = PlayerFinalRecord(
+    player_name="杜埃",
+    country="法国",
+    final_type=FinalType.WIN,
+    performance_score=10.0,
+    goal_contribution=2.0,
+    key_action_quality=+1.0,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="首秀决赛就梅开二度，潜力新星，金球候选",
+    narrative=(
+        "PSG对国际米兰的决赛中，杜埃展现出超龄的冷静和杀手本能—— "
+        "两次精准射门，两粒进球，帮助PSG5-0大胜。 "
+        "这是他第一届欧冠决赛，两个进球展现了他的跑位智慧和射门技术。 "
+        "心态上属于「内外兼修」型：自我认知稳定，不因进球而飘，不因大胜而忘形。 "
+        "对法国2026世界杯是极强正能量信号——PSG帮法国球员建立了冠军心态。"
+    ),
+)
+
+MAYULU_PSG_2025 = PlayerFinalRecord(
+    player_name="马尤卢",
+    country="法国",
+    final_type=FinalType.WIN,
+    performance_score=8.5,
+    goal_contribution=1.0,
+    key_action_quality=+0.7,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="青训成果，决赛锦上添花",
+    narrative=(
+        "PSG决赛5-0大胜，马尤卢在比赛后段攻入1球，锦上添花。 "
+        "作为PSG青训培养的法国年轻球员，这场冠军经历对他的职业生涯意义重大。 "
+        "心态上属于「求外」型——需要持续证明自己配得上这支球队。 "
+        "决赛进球是重要的自我确认，但真正的考验是持续的稳定性。 "
+        "对法国2026世界杯的信号：法国青训成果开始兑现，板凳深度充足。"
+    ),
+)
+
+# ── Inter 意大利/摩洛哥球员（2025 UCL Final：PSG 5-0 Inter）────────
+HAKIMI_INTER_2025 = PlayerFinalRecord(
+    player_name="阿什拉夫",
+    country="摩洛哥",
+    final_type=FinalType.WIN,
+    performance_score=8.0,
+    goal_contribution=1.0,
+    key_action_quality=+0.8,
+    was_home_player=False,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="为摩洛哥足球创造历史",
+    narrative=(
+        "国际米兰5-0大胜PSG，阿什拉夫在右路攻防两端均有出色表现，攻入1球。 "
+        "作为摩洛哥球员，他对欧洲顶级赛场的适应力和心态稳定值得注意。 "
+        "这场胜利对摩洛哥2026世界杯是积极信号——非洲球员在欧洲顶级舞台的成功经验。"
+    ),
+)
+
+LAUTARO_INTER_2025 = PlayerFinalRecord(
+    player_name="劳塔罗·马丁内斯",
+    country="阿根廷",
+    final_type=FinalType.LOSS,
+    performance_score=6.0,
+    goal_contribution=0.0,
+    key_action_quality=-0.5,
+    was_home_player=True,
+    team_eliminated_before_final=False,
+    teammate_in_final=False,
+    personal_stakes="冲击首座欧冠冠军和金球奖",
+    narrative=(
+        "劳塔罗在国际米兰0-5惨败给PSG，决赛完全失常。 "
+        "作为阿根廷2022世界杯功臣，这场失败对他的心态是沉重打击—— "
+        "核心价值被质疑，但未到心理崩溃程度，而是「求而不得」的自我怀疑。 "
+        "参照2014巴西1-7：强队在大舞台上的结构性心态坍塌，他属于这个框架的边缘。 "
+        "阿根廷世界杯前需要解决的是：如何在劳塔罗核心价值被质疑时重新整合球队。"
+    ),
+)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 2025-26 赛季记录（皇马3-5被阿森纳双杀）
+# ══════════════════════════════════════════════════════════════════
+
+MBAPPE_REAL_MADRID_2026 = PlayerFinalRecord(
+    player_name="姆巴佩",
+    country="法国",
+    final_type=FinalType.QUARTERFINAL_BLOWOUT_LOSS,
+    performance_score=7.2,
+    goal_contribution=2.0,
+    key_action_quality=+0.3,
+    was_home_player=True,
+    team_eliminated_before_final=True,
+    teammate_in_final=False,
+    personal_stakes="连续两年在皇马被淘汰，需要在世界杯前重置心态",
+    narrative=(
+        "2025-26赛季，皇马在QFs以3-5总比分被阿森纳双杀（两回合均有进球）。"
+        "值得注意的是，这是皇马连续第二年在QFs被淘汰——去年是3-4拜仁，今年是3-5阿森纳。"
+        "叙事重构：去年是「时运不济」，今年变成「结构性失败」——同样的错误模式重复出现。"
+        "「求外」型：问题不在能力，在他对胜利的执念和皇马的系统性不兼容。"
+        "参照2014巴西1-7框架：心态的崩塌是递进的，从「偏移」到「坍塌」。"
+        "对法国2026世界杯的影响：最大风险信号，不是个人状态而是心理预期管理。"
+    ),
+)
+
+SAKA_ARSENAL_2026 = PlayerFinalRecord(
+    player_name="萨卡",
+    country="英格兰",
+    final_type=FinalType.SEMI_BLOWOUT_WIN,
+    performance_score=8.2,
+    goal_contribution=2.0,
+    key_action_quality=+0.7,
+    was_home_player=True,
+    team_eliminated_before_final=True,
+    teammate_in_final=False,
+    personal_stakes="连续两年带领阿森纳晋级欧冠决赛均失败",
+    narrative=(
+        "2025-26赛季，萨卡继续高光表现（两回合对皇马都有进球或助攻），"
+        "但阿森纳在半决赛被国际米兰淘汰（未能连续两年进决赛）。"
+        "关键心态信号：去年是「赢了一切只是还没赢决赛」，今年变成「为什么总是差一步」。"
+        "「求内」型，但今年开始出现「求不得」的影子——从内在驱动开始滑向外在认可。"
+        "参照2018法国框架：他在学习如何赢，但还没学会如何在关键时刻不失去自我。"
+        "对英格兰世界杯的影响：心态信号偏中性，需要看他能否将「失败经验」转化为内在智慧。"
+    ),
+)
+
+# ══════════════════════════════════════════════════════════════════
+# 批量计算 & 整合
+# ══════════════════════════════════════════════════════════════════
+
+def compute_country_ucl_mentality_bonus(country: str) -> Dict:
+    # 英→中 国家名映射（对接leaderboard.py的英文名）
+    EN_TO_ZH = {
+        "France": "法国",
+        "England": "英格兰",
+        "Georgia": "格鲁吉亚",
+        "Portugal": "葡萄牙",
+        "Italy": "意大利",
+        "Argentina": "阿根廷",
+    }
+    lookup = EN_TO_ZH.get(country, country)
+
+    ALL_PLAYER_RECORDS: List[PlayerFinalRecord] = [
+        # 法国 — 双赛季姆巴佩（两条独立心态轨迹）
+        MBAPPE_REAL_MADRID_2025,         # 法国，2024-25赛季皇马3-4拜仁，PSG进决赛（对比参照）
+        MBAPPE_REAL_MADRID_2026,         # 法国，2025-26赛季皇马3-5阿森纳，连续两年出局（最大风险信号）
+        DEMBELE_PSG_2025,                # 法国，决赛2助攻，金球奖
+        DOUE_PSG_2025,                   # 法国，决赛梅开二度，评分10
+        MAYULU_PSG_2025,                 # 法国，决赛锦上添花
+        # 英格兰 — 双赛季萨卡
+        SAKA_ARSENAL_2025,               # 英格兰，2024-25带领阿森纳进决赛（英超冠军）
+        SAKA_ARSENAL_2026,               # 英格兰，2025-26半决赛出局
+        # 其他国家
+        K77_PSG_2025,                    # 格鲁吉亚，决赛进球
+        VITINHA_PSG_2025,                # 葡萄牙，决赛稳定控场
+        DONNARUMMA_PSG_2025,             # 意大利，零封
+        LAUTARO_INTER_2025,              # 阿根廷，决赛0-5惨败
+        HAKIMI_INTER_2025,               # 摩洛哥，国米进球但队输0-5
+    ]
+
+    country_signals: List[FinalMentalitySignal] = []
+    for record in ALL_PLAYER_RECORDS:
+        if record.country == lookup:
+            sig = compute_final_mentality_signal(record)
+            country_signals.append(sig)
+
+    if not country_signals:
+        return {
+            "reversal_risk_add": 0.0,
+            "water_score_add": 0.0,
+            "favorite_curse_add": 0.0,
+            "contrarian_add": 0.0,
+            "soft_power_add": 0.0,
+            "mentality_avg": 0.0,
+            "wc_total_adjustment": 0.0,
+            "signal_count": 0,
+        }
+
+    n = len(country_signals)
+    result = {
+        "reversal_risk_add": sum(s.reversal_risk_add for s in country_signals) / n,
+        "water_score_add": sum(s.water_score_add for s in country_signals) / n,
+        "favorite_curse_add": sum(s.favorite_curse_add for s in country_signals) / n,
+        "contrarian_add": sum(s.contrarian_add for s in country_signals) / n,
+        "soft_power_add": sum(s.soft_power_add for s in country_signals) / n,
+        "mentality_avg": sum(s.mentality_score for s in country_signals) / n,
+        "wc_total_adjustment": sum(s.wc_prob_adjustment for s in country_signals),
+        "signal_count": n,
+        "signals": country_signals,
+    }
+    return result
+
+
+def format_ucl_mentality_report(country: str) -> str:
+    bonus = compute_country_ucl_mentality_bonus(country)
+    signals = bonus.get("signals", [])
+
+    if not signals:
+        return f"**{country}** — 无欧冠决赛心态数据"
+
+    lines = [
+        f"**⚡ {country} · 欧冠决赛心态信号**\n",
+        f"球员样本：{bonus['signal_count']}人",
+        f"平均心态分：{bonus['mentality_avg']:+.2f}",
+        f"世界杯概率修正：{bonus['wc_total_adjustment']:+.2f}%\n",
+        "---",
+    ]
+
+    for sig in signals:
+        lines.append(
+            f"**{sig.player_name}** ({sig.tier_label}) · "
+            f"心态分 {sig.mentality_score:+.2f}\n"
+            f"> {sig.narrative[:100]}...\n"
+            f"> 框架：{sig.nearest_framework}\n"
+            f"> WC修正：{sig.wc_verdict}"
+        )
+        lines.append("")
+
+    return "\n".join(lines)

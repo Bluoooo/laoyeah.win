@@ -1,0 +1,31 @@
+@"
+project:
+  name: "world-cup-2026-predictor"
+  random_seed: 42
+  version: "0.1.0"
+
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_external: "data/external"
+  data_interim: "data/interim"
+  models: "models"
+  outputs: "outputs"
+  figures: "outputs/figures"
+
+data:
+  train_end_year: 2022
+  val_start_year: 2022
+  val_end_year: 2024
+  test_start_year: 2024
+
+model:
+  optuna_trials: 50
+  cv_folds: 5
+  monte_carlo_iterations: 10000
+
+features:
+  recent_match_windows: [5, 10, 20]
+  elo_initial: 1500
+  elo_k_factor: 32
+"@ | Set-Content configs\config.yaml -Encoding UTF8

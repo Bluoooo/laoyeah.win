@@ -1,0 +1,35 @@
+column,type,description
+player_id,string,Transfermarkt unique player ID
+name,string,Player full name
+age,int,Current age (at time of scrape)
+nationality,string,Player nationality country
+position,string,Specific position (e.g. Centre-Forward)
+position_group,string,Grouped position: Forward / Midfielder / Defender / Goalkeeper
+current_club,string,Club at time of scrape
+league_name,string,"League the player was listed in (Premier League, La Liga, etc.)"
+current_value_eur,float,Current market value in EUR
+current_value_tier,string,Bucketed tier: World Class / Elite / Top / Regular / Developing
+peak_value_eur,float,All-time highest recorded market value in EUR
+peak_value_tier,string,Bucketed tier at peak value
+peak_date,date,Date when player reached peak market value
+peak_club,string,Club the player was at when reaching peak value
+age_at_peak,float,Player age when reaching peak market value
+first_value_eur,float,First recorded market value in EUR
+first_date,date,Date of first market value record
+last_value_eur,float,Most recent recorded market value in EUR
+last_date,date,Date of most recent value record
+career_span_years,float,Years between first and last valuation record
+years_to_peak,float,Years from first recorded value to peak value
+value_cagr,float,Compound Annual Growth Rate from first to last value
+value_to_peak_cagr,float,CAGR from first value to peak value
+value_multiplier_x,float,Peak value ÷ first value (how many times value grew)
+post_peak_decline_pct,float,% decline from peak to last value
+value_volatility,float,Std deviation / mean of all valuations (instability measure)
+mean_yoy_growth_rate,float,Average year-over-year growth rate across career
+num_valuation_points,int,Number of valuation data points in career history
+num_clubs_career,int,Count of unique clubs across full valuation history
+trajectory,string,Career arc: rising_star / growing / stable / declining / falling_sharply
+is_at_peak,int,1 if player is currently at their career peak value
+ever_100m,int,1 if player ever reached €100M+ valuation
+ever_50m,int,1 if player ever reached €50M+ valuation
+ever_10m,int,1 if player ever reached €10M+ valuation

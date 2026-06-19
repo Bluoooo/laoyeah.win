@@ -1,0 +1,48 @@
+﻿# --- Core data ---
+numpy
+pandas
+pyarrow
+scipy
+# --- Machine Learning ---
+scikit-learn
+xgboost
+lightgbm
+optuna
+shap
+# --- Deep Learning ---
+torch
+# --- Visualization ---
+matplotlib
+seaborn
+plotly
+streamlit
+# --- Notebooks ---
+jupyterlab
+notebook
+ipykernel
+ipython
+# --- MLOps ---
+mlflow
+joblib
+# --- Dev tools ---
+black
+flake8
+isort
+pytest
+pytest-cov
+ipdb
+pre-commit
+# --- Utilities ---
+python-dotenv
+pyyaml
+tqdm
+typer
+loguru
+requests
+beautifulsoup4
+gnews
+newspaper4k
+googlenewsdecoder
+google-genai
+# --- Editable install ---
+-e .
