@@ -23,10 +23,9 @@
 
 | 路径 | 内容 | 技术 |
 |------|------|------|
-| `/` | **Landing Page** — 集团形象展示 + 世界地图 + 世界杯倒计时 | HTML + CSS + JS |
+| `/` | **Landing Page** — 集团形象展示  | HTML + CSS + JS |
 | `/worldcup-2026/` | **2026 世界杯预测** — 5模型集成 + 深度分析 | FastAPI + Poisson + Skill |
 | `/show/` | **墨迹擦除展示页** — 交互式品牌展示 | Canvas API |
-| `/666/` | **梅西彩蛋** | 静态页 |
 | `/api/` | **预测 API** — 实时比分预测 | 见 engine/ |
 
 ## 预测引擎
@@ -85,6 +84,6 @@ python3 predict_server.py
 
 ## 许可证
 
-© 2026 老爷集团 (Laoye Group)。保留所有权利。
+© 2026 老爷集团 (Laoyeah Group)。保留所有权利。
 
 各开源模型遵循其原始许可证，详见各子目录中的 LICENSE 文件。
